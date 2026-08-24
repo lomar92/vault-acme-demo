@@ -46,12 +46,9 @@ if git diff --cached | grep -qE '(hvs\.|hvb\.)[A-Za-z0-9]{20,}'; then
 fi
 
 # ── 3. Private Key Header ────────────────────────────────────────────────────
-if git diff --cached | grep -qF '-----BEGIN PRIVATE KEY-----' || \
-   git diff --cached | grep -qF '-----BEGIN RSA PRIVATE KEY-----' || \
-   git diff --cached | grep -qF '-----BEGIN EC PRIVATE KEY-----' || \
-   git diff --cached | grep -qF '-----BEGIN OPENSSH PRIVATE KEY-----'; then
+if git diff --cached | grep -qE '^\+-----(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY)-----'; then
     flag "Private Key im Commit gefunden"
-    git diff --cached | grep -n 'BEGIN.*PRIVATE KEY' | head -5
+    git diff --cached | grep -nE '^\+-----BEGIN.*PRIVATE KEY' | head -5
 fi
 
 # ── 4. Vault Enterprise License Pattern ─────────────────────────────────────
