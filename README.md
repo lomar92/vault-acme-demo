@@ -413,7 +413,7 @@ echo "127.0.0.1 amar-demo.local" | sudo tee -a /etc/hosts
 ### Schritt 3 — Vault starten
 
 ```bash
-cd ai-demo
+cd vault-acme-demo
 
 docker run -d \
   --name vault-2.0.0 \
@@ -474,7 +474,7 @@ terraform apply -var="vault_token=<ROOT_TOKEN>"
 ### Schritt 6 — Demo Microservice starten
 
 ```bash
-cd ..  # zurück in ai-demo/
+cd ..  # zurück in vault-acme-demo/
 docker compose up --build
 ```
 
@@ -526,7 +526,7 @@ dieses Repository und Terminal) die gesamte Demo starten lassen.
 
 ```
 Ich möchte die Vault PKI ACME Demo starten. Das Projekt liegt unter
-/Users/<dein-user>/coding/ai/ai-demo.
+/Users/<dein-user>/vault-acme-demo.
 
 Bitte führe folgende Schritte durch:
 
@@ -795,28 +795,35 @@ docker inspect vault-acme-demo --format '{{json .NetworkSettings.Networks}}' | p
 ## 9. Projektstruktur
 
 ```
-ai-demo/
+vault-acme-demo/
 ├── app/
 │   ├── acme_client.py       # ACME-Flow (http-01 Challenge, Vault-Nonce-Workaround)
 │   ├── main.py              # FastAPI HTTPS-Server + Renewal Loop
 │   └── requirements.txt     # Python Dependencies
 │
+├── scripts/
+│   └── security-check.sh   # Pre-commit Security Agent (scannt auf Secrets/Keys)
+│
 ├── terraform/
 │   ├── main.tf              # PKI Root CA, Intermediate CA, ACME Config
-│   ├── variables.tf         # vault_addr, vault_token, domain, cert_ttl
+│   ├── variables.tf         # vault_addr, vault_token, domain, cert_ttl, vault_docker_ip
 │   ├── outputs.tf           # ACME Directory URL, CA URLs, Service URL
 │   └── provider.tf          # Terraform-Version + Vault Provider (hashicorp/vault ~> 4.0)
 │
 ├── vault-config/
 │   └── vault.hcl            # Vault Production Config (Raft, TLS-disable, UI)
 │
-├── vault-data/              # Raft Storage Volume (persistent)
+├── vault-data/              # Raft Storage Volume (persistent) — in .gitignore
 │
+├── .gitignore               # Schützt vault-secrets.txt, vault-data/, tfstate, certs
+├── deploy.sh                # Einzel-Befehl-Deployment (Vault + Terraform + Docker + CA-Trust)
 ├── docker-compose.yml       # Demo Microservice (dev-network, amar-demo.local alias)
 ├── Dockerfile               # Python 3.11 slim, Port 80 + 8443
-├── vault-secrets.txt        # Root Token, Unseal Key, Enterprise License
+├── vault-secrets.example.txt  # Template für Credentials (vault-secrets.txt ist gitignored)
 └── README.md                # Diese Dokumentation
 ```
+
+> **Hinweis:** `vault-secrets.txt` (Root Token, Unseal Key, Lizenz) ist in `.gitignore` und wird **nicht** ins Repository committed. Kopiere `vault-secrets.example.txt` → `vault-secrets.txt` und trage deine Werte ein.
 
 ### Umgebungsvariablen (docker-compose.yml)
 
