@@ -32,11 +32,15 @@ def parse_json(raw: str) -> object:
 
 
 def main():
-    # Authentication priority:
-    # 1. OIDC workload identity federation (GitHub Actions) — no static key needed.
-    #    Configure once in Anthropic Console → Settings → Workload Identity Federation.
-    # 2. ANTHROPIC_API_KEY env var — fallback for local runs.
-    api_key = os.environ.get("ANTHROPIC_API_KEY")  # None → SDK uses federated auth
+    # Authentication — two modes:
+    # 1. Workload Identity Federation (GitHub Actions, no static key):
+    #    The workflow fetches a GitHub OIDC token and writes it to the path in
+    #    ANTHROPIC_IDENTITY_TOKEN_FILE. The SDK exchanges it automatically on the
+    #    first API call. Required env vars (set as GitHub Actions variables):
+    #      ANTHROPIC_IDENTITY_TOKEN_FILE, ANTHROPIC_FEDERATION_RULE_ID,
+    #      ANTHROPIC_ORGANIZATION_ID, ANTHROPIC_SERVICE_ACCOUNT_ID, ANTHROPIC_WORKSPACE_ID
+    # 2. ANTHROPIC_API_KEY — fallback for local development.
+    api_key = os.environ.get("ANTHROPIC_API_KEY")  # None → SDK uses WIF credentials
 
     today = date.today().isoformat()
     report_dir = Path("security")

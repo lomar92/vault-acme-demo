@@ -98,11 +98,31 @@ jobs:
       - name: Install app dependencies (for pip-audit)
         run: pip install --quiet -r app/requirements.txt || true
 
+      # WIF Step 1: request a short-lived GitHub OIDC token and save it to disk.
+      # The Anthropic SDK reads ANTHROPIC_IDENTITY_TOKEN_FILE on first API call
+      # and exchanges it for an Anthropic access token automatically.
+      - name: Fetch GitHub OIDC token
+        run: |
+          curl -sS \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
+            | jq -r .value > /tmp/gha-jwt
+
+      # WIF Step 2: run the audit. The SDK picks up the four Anthropic federation
+      # variables from GitHub Actions variables (Settings → Variables → Actions).
+      # Set up once in Anthropic Console → Settings → Workload Identity Federation:
+      #   ANTHROPIC_ORGANIZATION_ID      — Settings → Organization
+      #   ANTHROPIC_SERVICE_ACCOUNT_ID   — created during WIF wizard (svac_...)
+      #   ANTHROPIC_FEDERATION_RULE_ID   — created during WIF wizard (fdrl_...)
+      #   ANTHROPIC_WORKSPACE_ID         — created during WIF wizard (wrkspc_...)
       - name: Claude Security Agent — run audit
         id: audit
-        # No ANTHROPIC_API_KEY needed — authentication via OIDC workload identity
-        # federation. Configure the GitHub Actions OIDC issuer once in the
-        # Anthropic Console under Settings → Workload Identity Federation.
+        env:
+          ANTHROPIC_IDENTITY_TOKEN_FILE: /tmp/gha-jwt
+          ANTHROPIC_FEDERATION_RULE_ID:  ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          ANTHROPIC_ORGANIZATION_ID:     ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          ANTHROPIC_SERVICE_ACCOUNT_ID:  ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          ANTHROPIC_WORKSPACE_ID:        ${{ vars.ANTHROPIC_WORKSPACE_ID }}
         run: |
           python3 scripts/claude-security-agent.py
         continue-on-error: true
