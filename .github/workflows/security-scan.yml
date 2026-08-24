@@ -66,11 +66,11 @@ jobs:
               labels: ['security', 'automated'],
             });
 
-# ── Job 2: Code Security Audit (bi-weekly + manuell) ─────────────────────────
+# ── Job 2: Claude Security Engineer Agent (bi-weekly + manual) ───────────────
   code-audit:
-    name: Code Security Audit (bi-weekly)
+    name: Claude Security Engineer Agent (bi-weekly)
     runs-on: ubuntu-latest
-    # Läuft bei: bi-weekly Schedule ODER manuellem Trigger mit run_audit=true
+    # Runs on: bi-weekly schedule OR manual trigger with run_audit=true
     if: |
       github.event.schedule == '0 8 1,15 * *' ||
       (github.event_name == 'workflow_dispatch' && inputs.run_audit == true)
@@ -90,62 +90,43 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Audit-Tools installieren
+      - name: Install security tools + Anthropic SDK
         run: |
-          pip install --quiet bandit pip-audit checkov
+          pip install --quiet bandit pip-audit checkov anthropic
 
-      - name: App-Dependencies installieren (für pip-audit)
+      - name: Install app dependencies (for pip-audit)
         run: pip install --quiet -r app/requirements.txt || true
 
-      - name: Code Audit ausführen
+      - name: Claude Security Agent — run audit
         id: audit
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          chmod +x scripts/code-audit.sh
-          bash scripts/code-audit.sh
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          python3 scripts/claude-security-agent.py
         continue-on-error: true
 
-      - name: Report-Datei prüfen
-        id: report
-        run: |
-          DATE=$(date +%Y-%m-%d)
-          REPORT="security/audit-${DATE}.md"
-          if [ -f "$REPORT" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "file=$REPORT" >> "$GITHUB_OUTPUT"
-            echo "date=$DATE" >> "$GITHUB_OUTPUT"
-            # Severity-Summary aus Report extrahieren
-            CRITICAL=$(grep -oP '🔴 Critical \| \K\d+' "$REPORT" || echo "0")
-            HIGH=$(grep -oP '🟠 High \| \K\d+' "$REPORT" || echo "0")
-            echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
-            echo "high=$HIGH" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Sauberer Audit: Security-Branch aufräumen falls vorhanden
-      - name: Security-Branch aufräumen (kein Incident)
+      # Clean audit: delete security branch if it exists from a previous run
+      - name: Clean up security branch (no incident)
         if: steps.audit.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DATE="${{ steps.report.outputs.date }}"
+          DATE="${{ steps.audit.outputs.date }}"
           BRANCH="security/audit-${DATE}"
-          # Branch löschen falls er vom vorherigen Run existiert
           git push origin --delete "$BRANCH" 2>/dev/null && \
-            echo "Branch $BRANCH gelöscht" || \
-            echo "Kein Branch $BRANCH vorhanden — nichts zu tun"
+            echo "Branch $BRANCH deleted" || \
+            echo "No branch $BRANCH — nothing to do"
 
-      # PR nur bei CRITICAL oder HIGH Findings (code-audit.sh gibt exit 1 zurück)
-      - name: Branch erstellen + Report committen
-        if: steps.audit.outcome == 'failure' && steps.report.outputs.exists == 'true'
+      # PR only on CRITICAL or HIGH findings (agent exits 1 in that case)
+      - name: Create branch + commit report
+        if: steps.audit.outcome == 'failure' && steps.audit.outputs.report_file != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DATE="${{ steps.report.outputs.date }}"
+          DATE="${{ steps.audit.outputs.date }}"
           BRANCH="security/audit-${DATE}"
 
-          git config user.name "Security Engineer Agent"
+          git config user.name "Claude Security Engineer Agent"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
@@ -153,27 +134,27 @@ jobs:
           git add security/
 
           if git diff --cached --quiet; then
-            echo "Keine Änderungen — Report bereits committed"
+            echo "No changes — report already committed"
             exit 0
           fi
 
-          git commit -m "security: audit findings ${DATE} — Critical=${{ steps.report.outputs.critical }} High=${{ steps.report.outputs.high }}"
+          git commit -m "security: Claude audit findings ${DATE} — Critical=${{ steps.audit.outputs.critical }} High=${{ steps.audit.outputs.high }}"
           git push origin "$BRANCH" --force
 
-      - name: Pull Request öffnen (nur bei CRITICAL / HIGH)
-        if: steps.audit.outcome == 'failure' && steps.report.outputs.exists == 'true'
+      - name: Open Pull Request (CRITICAL / HIGH only)
+        if: steps.audit.outcome == 'failure' && steps.audit.outputs.report_file != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DATE="${{ steps.report.outputs.date }}"
+          DATE="${{ steps.audit.outputs.date }}"
           BRANCH="security/audit-${DATE}"
-          CRITICAL="${{ steps.report.outputs.critical }}"
-          REPORT_FILE="${{ steps.report.outputs.file }}"
+          CRITICAL="${{ steps.audit.outputs.critical }}"
+          REPORT_FILE="${{ steps.audit.outputs.report_file }}"
 
           if [ "$CRITICAL" -gt 0 ]; then
-            TITLE="🔴 Security Incident ${DATE} — CRITICAL Findings (${{ steps.report.outputs.critical }}x Critical, ${{ steps.report.outputs.high }}x High)"
+            TITLE="🔴 Security Incident ${DATE} — CRITICAL Findings (${{ steps.audit.outputs.critical }}x Critical, ${{ steps.audit.outputs.high }}x High)"
           else
-            TITLE="🟠 Security Incident ${DATE} — HIGH Findings (${{ steps.report.outputs.high }}x High)"
+            TITLE="🟠 Security Incident ${DATE} — HIGH Findings (${{ steps.audit.outputs.high }}x High)"
           fi
 
           EXISTING_PR=$(gh pr list \
@@ -184,7 +165,7 @@ jobs:
             --jq '.[0].number' 2>/dev/null || echo "")
 
           if [ -n "$EXISTING_PR" ]; then
-            echo "PR #${EXISTING_PR} existiert bereits — aktualisiere Titel"
+            echo "PR #${EXISTING_PR} already exists — updating title"
             gh pr edit "$EXISTING_PR" --title "$TITLE" || true
             exit 0
           fi
