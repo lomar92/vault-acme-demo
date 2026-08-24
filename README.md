@@ -2,7 +2,9 @@
 
 A Python microservice that automatically obtains and renews TLS certificates from HashiCorp Vault using the ACME protocol (http-01 challenge). Built for demonstrating zero-touch certificate management.
 
-> **German documentation:** See [README.de.md](README.de.md) for the full in-depth guide including architecture diagrams, ACME protocol walkthrough, and troubleshooting.
+> **In-depth guides:**
+> - English: [README.en.md](README.en.md) — full guide with ACME protocol walkthrough, nonce deep-dive, Vault PKI details, and troubleshooting
+> - Deutsch: [README.de.md](README.de.md) — vollständige Anleitung auf Deutsch
 
 ---
 
@@ -75,8 +77,9 @@ vault-acme-demo/
 │   ├── main.py              # FastAPI HTTPS server + renewal loop
 │   └── requirements.txt
 ├── scripts/
-│   ├── security-check.sh   # Pre-commit hook: blocks secrets from being committed
-│   └── security-scan-repo.sh  # Full repo scanner (runs in GitHub Actions)
+│   ├── security-check.sh      # Pre-commit hook: blocks secrets from being committed
+│   ├── security-scan-repo.sh  # Full repo scanner (runs in GitHub Actions)
+│   └── code-audit.sh          # Bi-weekly audit: bandit · pip-audit · checkov
 ├── terraform/
 │   ├── main.tf              # PKI hierarchy + ACME config
 │   ├── variables.tf         # vault_addr, vault_token, domain, cert_ttl, vault_docker_ip
@@ -89,8 +92,9 @@ vault-acme-demo/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── vault-secrets.example.txt  # Credentials template (vault-secrets.txt is gitignored)
-├── README.md                # This file (English)
-└── README.de.md             # Full German documentation
+├── README.md                # This file — English quick-start
+├── README.en.md             # Full English in-depth guide
+└── README.de.md             # Vollständige deutsche Anleitung
 ```
 
 ---
