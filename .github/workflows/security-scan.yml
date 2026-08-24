@@ -10,6 +10,8 @@ on:
   # Bei Pull Requests
   pull_request:
     branches: [main]
+  # Manuell aus GitHub UI oder CLI triggern
+  workflow_dispatch:
 
 permissions:
   contents: read
