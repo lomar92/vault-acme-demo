@@ -1,40 +1,45 @@
 name: Security Engineer Agent
 
 on:
-  # Wöchentlich: Montag 08:00 UTC
   schedule:
-    - cron: '0 8 * * 1'
-  # Bei jedem Push auf main
+    - cron: '0 8 * * 1'      # Secret Scan: wöchentlich (Montag 08:00 UTC)
+    - cron: '0 8 1,15 * *'   # Code Audit:  bi-weekly (1. + 15. des Monats)
   push:
     branches: [main]
-  # Bei Pull Requests
   pull_request:
     branches: [main]
-  # Manuell aus GitHub UI oder CLI triggern
   workflow_dispatch:
+    inputs:
+      run_audit:
+        description: 'Code Audit zusätzlich ausführen'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  issues: write  # Für automatische Issue-Erstellung bei Findings
 
+# ── Job 1: Secret & Config Scan (läuft immer) ────────────────────────────────
 jobs:
-  security-scan:
-    name: Repository Security Scan
+  secret-scan:
+    name: Secret & Config Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - name: Checkout (vollständige Historie)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Gesamte Git-Historie für Commit-Scan
+          fetch-depth: 0
 
-      - name: Security Engineer Agent ausführen
+      - name: Security Engineer Agent — Secret Scan
         id: scan
         run: |
           chmod +x scripts/security-scan-repo.sh
           bash scripts/security-scan-repo.sh
 
-      - name: GitHub Issue erstellen bei Findings (nur Scheduled Run)
+      - name: GitHub Issue bei Findings (nur Scheduled Run)
         if: failure() && github.event_name == 'schedule'
         uses: actions/github-script@v7
         with:
@@ -43,23 +48,153 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[Security] Wöchentlicher Scan — Findings am ${date}`,
+              title: `[Security] Secret Scan Findings — ${date}`,
               body: [
-                '## Security Engineer Agent — Findings',
+                '## Security Engineer Agent — Secret Scan Findings',
                 '',
                 `**Datum:** ${date}`,
-                `**Workflow:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
-                '',
-                '### Was wurde gefunden?',
-                'Der automatische Security Scan hat sensible Daten oder Konfigurationsprobleme im Repository erkannt.',
+                `**Workflow:** [Run ${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
                 '',
                 '### Sofort-Maßnahmen',
                 '- [ ] Workflow-Logs prüfen (Link oben)',
                 '- [ ] Betroffene Dateien identifizieren',
-                '- [ ] Secrets ggf. aus Git-Historie entfernen (`git filter-repo`)',
+                '- [ ] Secrets aus Git-Historie entfernen (`git filter-repo`)',
                 '- [ ] Betroffene Credentials rotieren (Vault Token, Unseal Key)',
                 '',
-                '> Dieses Issue wurde automatisch vom Security Engineer Agent erstellt.',
+                '> Automatisch erstellt vom Security Engineer Agent.',
               ].join('\n'),
               labels: ['security', 'automated'],
             });
+
+# ── Job 2: Code Security Audit (bi-weekly + manuell) ─────────────────────────
+  code-audit:
+    name: Code Security Audit (bi-weekly)
+    runs-on: ubuntu-latest
+    # Läuft bei: bi-weekly Schedule ODER manuellem Trigger mit run_audit=true
+    if: |
+      github.event.schedule == '0 8 1,15 * *' ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_audit == true)
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python 3.11 setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Audit-Tools installieren
+        run: |
+          pip install --quiet bandit pip-audit checkov
+
+      - name: App-Dependencies installieren (für pip-audit)
+        run: pip install --quiet -r app/requirements.txt || true
+
+      - name: Code Audit ausführen
+        id: audit
+        run: |
+          chmod +x scripts/code-audit.sh
+          bash scripts/code-audit.sh
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Report-Datei prüfen
+        id: report
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          REPORT="security/audit-${DATE}.md"
+          if [ -f "$REPORT" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "file=$REPORT" >> "$GITHUB_OUTPUT"
+            echo "date=$DATE" >> "$GITHUB_OUTPUT"
+            # Severity-Summary aus Report extrahieren
+            CRITICAL=$(grep -oP '🔴 Critical \| \K\d+' "$REPORT" || echo "0")
+            HIGH=$(grep -oP '🟠 High \| \K\d+' "$REPORT" || echo "0")
+            echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
+            echo "high=$HIGH" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Branch erstellen + Report committen
+        if: steps.report.outputs.exists == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE="${{ steps.report.outputs.date }}"
+          BRANCH="security/audit-${DATE}"
+
+          git config user.name "Security Engineer Agent"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Branch anlegen (oder bestehenden updaten)
+          git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+
+          mkdir -p security
+          git add security/
+
+          if git diff --cached --quiet; then
+            echo "Keine Änderungen — Report bereits aktuell"
+            exit 0
+          fi
+
+          git commit -m "security: bi-weekly code audit ${DATE}
+
+          Critical: ${{ steps.report.outputs.critical }}
+          High: ${{ steps.report.outputs.high }}"
+
+          git push origin "$BRANCH" --force
+
+      - name: Pull Request öffnen
+        if: steps.report.outputs.exists == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE="${{ steps.report.outputs.date }}"
+          BRANCH="security/audit-${DATE}"
+          CRITICAL="${{ steps.report.outputs.critical }}"
+          HIGH="${{ steps.report.outputs.high }}"
+          REPORT_FILE="${{ steps.report.outputs.file }}"
+
+          # Titel und Label je nach Schweregrad
+          if [ "$CRITICAL" -gt 0 ]; then
+            TITLE="🔴 Security Audit ${DATE} — CRITICAL Findings (${CRITICAL}x)"
+            LABEL="security,critical"
+          elif [ "$HIGH" -gt 0 ]; then
+            TITLE="🟠 Security Audit ${DATE} — HIGH Findings (${HIGH}x)"
+            LABEL="security"
+          else
+            TITLE="✅ Security Audit ${DATE} — Keine kritischen Findings"
+            LABEL="security"
+          fi
+
+          # PR nur erstellen wenn noch keiner offen ist für diesen Branch
+          EXISTING_PR=$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --head "$BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #${EXISTING_PR} existiert bereits für Branch ${BRANCH}"
+            gh pr edit "$EXISTING_PR" --title "$TITLE" || true
+            exit 0
+          fi
+
+          BODY=$(cat "$REPORT_FILE")
+
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --base main \
+            --head "$BRANCH" \
+            --label "security" || echo "Labels nicht vorhanden — PR ohne Label erstellt"
