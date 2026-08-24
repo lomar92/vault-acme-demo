@@ -81,11 +81,8 @@ while IFS= read -r FILE; do
         grep -nE '(hvs\.|hvb\.)[A-Za-z0-9]{20,}' "$FILE" | head -3
     fi
 
-    # Private Key Header
-    if grep -qe 'BEGIN PRIVATE KEY' \
-             -e 'BEGIN RSA PRIVATE KEY' \
-             -e 'BEGIN EC PRIVATE KEY' \
-             -e 'BEGIN OPENSSH PRIVATE KEY' "$FILE" 2>/dev/null; then
+    # Private Key Header (vollständiges PEM-Format mit Dashes — vermeidet False Positives in Code)
+    if grep -qE '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' "$FILE" 2>/dev/null; then
         error "Private Key in: $FILE" "$FILE"
     fi
 
