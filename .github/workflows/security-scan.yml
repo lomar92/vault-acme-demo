@@ -1,0 +1,63 @@
+name: Security Engineer Agent
+
+on:
+  # Wöchentlich: Montag 08:00 UTC
+  schedule:
+    - cron: '0 8 * * 1'
+  # Bei jedem Push auf main
+  push:
+    branches: [main]
+  # Bei Pull Requests
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write  # Für automatische Issue-Erstellung bei Findings
+
+jobs:
+  security-scan:
+    name: Repository Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (vollständige Historie)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Gesamte Git-Historie für Commit-Scan
+
+      - name: Security Engineer Agent ausführen
+        id: scan
+        run: |
+          chmod +x scripts/security-scan-repo.sh
+          bash scripts/security-scan-repo.sh
+
+      - name: GitHub Issue erstellen bei Findings (nur Scheduled Run)
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const date = new Date().toISOString().split('T')[0];
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Security] Wöchentlicher Scan — Findings am ${date}`,
+              body: [
+                '## Security Engineer Agent — Findings',
+                '',
+                `**Datum:** ${date}`,
+                `**Workflow:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                '',
+                '### Was wurde gefunden?',
+                'Der automatische Security Scan hat sensible Daten oder Konfigurationsprobleme im Repository erkannt.',
+                '',
+                '### Sofort-Maßnahmen',
+                '- [ ] Workflow-Logs prüfen (Link oben)',
+                '- [ ] Betroffene Dateien identifizieren',
+                '- [ ] Secrets ggf. aus Git-Historie entfernen (`git filter-repo`)',
+                '- [ ] Betroffene Credentials rotieren (Vault Token, Unseal Key)',
+                '',
+                '> Dieses Issue wurde automatisch vom Security Engineer Agent erstellt.',
+              ].join('\n'),
+              labels: ['security', 'automated'],
+            });
