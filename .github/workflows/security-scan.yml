@@ -123,8 +123,22 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Sauberer Audit: Security-Branch aufräumen falls vorhanden
+      - name: Security-Branch aufräumen (kein Incident)
+        if: steps.audit.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE="${{ steps.report.outputs.date }}"
+          BRANCH="security/audit-${DATE}"
+          # Branch löschen falls er vom vorherigen Run existiert
+          git push origin --delete "$BRANCH" 2>/dev/null && \
+            echo "Branch $BRANCH gelöscht" || \
+            echo "Kein Branch $BRANCH vorhanden — nichts zu tun"
+
+      # PR nur bei CRITICAL oder HIGH Findings (code-audit.sh gibt exit 1 zurück)
       - name: Branch erstellen + Report committen
-        if: steps.report.outputs.exists == 'true'
+        if: steps.audit.outcome == 'failure' && steps.report.outputs.exists == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -134,48 +148,34 @@ jobs:
           git config user.name "Security Engineer Agent"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Branch anlegen (oder bestehenden updaten)
           git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
-
           mkdir -p security
           git add security/
 
           if git diff --cached --quiet; then
-            echo "Keine Änderungen — Report bereits aktuell"
+            echo "Keine Änderungen — Report bereits committed"
             exit 0
           fi
 
-          git commit -m "security: bi-weekly code audit ${DATE}
-
-          Critical: ${{ steps.report.outputs.critical }}
-          High: ${{ steps.report.outputs.high }}"
-
+          git commit -m "security: audit findings ${DATE} — Critical=${{ steps.report.outputs.critical }} High=${{ steps.report.outputs.high }}"
           git push origin "$BRANCH" --force
 
-      - name: Pull Request öffnen
-        if: steps.report.outputs.exists == 'true'
+      - name: Pull Request öffnen (nur bei CRITICAL / HIGH)
+        if: steps.audit.outcome == 'failure' && steps.report.outputs.exists == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           DATE="${{ steps.report.outputs.date }}"
           BRANCH="security/audit-${DATE}"
           CRITICAL="${{ steps.report.outputs.critical }}"
-          HIGH="${{ steps.report.outputs.high }}"
           REPORT_FILE="${{ steps.report.outputs.file }}"
 
-          # Titel und Label je nach Schweregrad
           if [ "$CRITICAL" -gt 0 ]; then
-            TITLE="🔴 Security Audit ${DATE} — CRITICAL Findings (${CRITICAL}x)"
-            LABEL="security,critical"
-          elif [ "$HIGH" -gt 0 ]; then
-            TITLE="🟠 Security Audit ${DATE} — HIGH Findings (${HIGH}x)"
-            LABEL="security"
+            TITLE="🔴 Security Incident ${DATE} — CRITICAL Findings (${{ steps.report.outputs.critical }}x Critical, ${{ steps.report.outputs.high }}x High)"
           else
-            TITLE="✅ Security Audit ${DATE} — Keine kritischen Findings"
-            LABEL="security"
+            TITLE="🟠 Security Incident ${DATE} — HIGH Findings (${{ steps.report.outputs.high }}x High)"
           fi
 
-          # PR nur erstellen wenn noch keiner offen ist für diesen Branch
           EXISTING_PR=$(gh pr list \
             --repo "${{ github.repository }}" \
             --head "$BRANCH" \
@@ -184,17 +184,22 @@ jobs:
             --jq '.[0].number' 2>/dev/null || echo "")
 
           if [ -n "$EXISTING_PR" ]; then
-            echo "PR #${EXISTING_PR} existiert bereits für Branch ${BRANCH}"
+            echo "PR #${EXISTING_PR} existiert bereits — aktualisiere Titel"
             gh pr edit "$EXISTING_PR" --title "$TITLE" || true
             exit 0
           fi
 
-          BODY=$(cat "$REPORT_FILE")
-
           gh pr create \
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
-            --body "$BODY" \
+            --body "$(cat "$REPORT_FILE")" \
             --base main \
             --head "$BRANCH" \
-            --label "security" || echo "Labels nicht vorhanden — PR ohne Label erstellt"
+            --label "security" \
+            --label "critical" 2>/dev/null || \
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --body "$(cat "$REPORT_FILE")" \
+            --base main \
+            --head "$BRANCH"
