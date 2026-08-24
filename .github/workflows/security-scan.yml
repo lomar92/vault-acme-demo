@@ -78,6 +78,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      id-token: write   # required for OIDC workload identity federation
 
     steps:
       - name: Checkout
@@ -99,8 +100,9 @@ jobs:
 
       - name: Claude Security Agent — run audit
         id: audit
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # No ANTHROPIC_API_KEY needed — authentication via OIDC workload identity
+        # federation. Configure the GitHub Actions OIDC issuer once in the
+        # Anthropic Console under Settings → Workload Identity Federation.
         run: |
           python3 scripts/claude-security-agent.py
         continue-on-error: true

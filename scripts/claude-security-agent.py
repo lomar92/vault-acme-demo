@@ -32,10 +32,11 @@ def parse_json(raw: str) -> object:
 
 
 def main():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("ERROR: ANTHROPIC_API_KEY not set", file=sys.stderr)
-        sys.exit(2)
+    # Authentication priority:
+    # 1. OIDC workload identity federation (GitHub Actions) — no static key needed.
+    #    Configure once in Anthropic Console → Settings → Workload Identity Federation.
+    # 2. ANTHROPIC_API_KEY env var — fallback for local runs.
+    api_key = os.environ.get("ANTHROPIC_API_KEY")  # None → SDK uses federated auth
 
     today = date.today().isoformat()
     report_dir = Path("security")
@@ -118,7 +119,8 @@ Be direct and actionable. Avoid repeating findings that are clearly false positi
 Return ONLY the Markdown PR body — no preamble, no wrapping code fences."""
 
     # ── 4. Call Claude API ────────────────────────────────────────────────────
-    client = anthropic.Anthropic(api_key=api_key)
+    # If api_key is None, the SDK automatically uses OIDC federated credentials.
+    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=4096,
