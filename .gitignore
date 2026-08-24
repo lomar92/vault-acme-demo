@@ -1,0 +1,50 @@
+# ============================================================
+# SENSIBLE DATEN — niemals committen
+# ============================================================
+
+# Vault Credentials (Token, Unseal Key, Enterprise License)
+vault-secrets.txt
+
+# Vault Raft Storage — enthält CA Private Keys + alle Secrets
+vault-data/
+
+# Terraform State — enthält Vault Issuer-UUIDs + Zertifikate im Klartext
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+
+# TLS-Zertifikate + Private Keys (zur Laufzeit generiert)
+app/certs/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# ============================================================
+# LOKALE UMGEBUNG
+# ============================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude Code lokale Settings
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+.env
+
+# Node / npm (falls Tools lokal installiert)
+node_modules/
+npm-debug.log*
+
+# Docker
+*.log

@@ -1,0 +1,24 @@
+services:
+  vault-acme-demo:
+    build: .
+    container_name: vault-acme-demo
+    ports:
+      - "8443:8443"  # HTTPS API
+    environment:
+      # Vault erreichbar via Docker-internem DNS (vault-2.0.0 = Container Name)
+      - VAULT_ADDR=http://vault-2.0.0:8200
+      - PKI_MOUNT=pki_int
+      - PKI_ROLE=amar-demo
+      - DOMAIN=amar-demo.local
+      - HTTPS_PORT=8443
+      - RENEW_SECONDS=60
+      - CHECK_INTERVAL=30
+    networks:
+      dev-network:
+        aliases:
+          - amar-demo.local   # Vault kann diesen Namen auflösen für ACME Challenge
+    restart: unless-stopped
+
+networks:
+  dev-network:
+    external: true   # Vorhandenes Netzwerk aus Docker Desktop
